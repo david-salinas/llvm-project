@@ -46,7 +46,6 @@
 
 #include "lldb/Host/posix/Fcntl.h"
 
-#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Threading.h"
 
 using namespace lldb;
@@ -363,7 +362,8 @@ Error ProcessFreeBSD::DoLaunch(Module *module, ProcessLaunchInfo &launch_info) {
 
   FileSpec working_dir = launch_info.GetWorkingDirectory();
   if (working_dir &&
-      (!working_dir.ResolvePath() || !llvm::sys::fs::is_directory(working_dir.GetPath())) {
+      (!working_dir.ResolvePath() ||
+       working_dir.GetFileType() != FileSpec::eFileTypeDirectory)) {
     error.SetErrorStringWithFormat("No such file or directory: %s",
                                    working_dir.GetCString());
     return error;
