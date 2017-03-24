@@ -71,14 +71,32 @@ InputSectionBase::InputSectionBase(InputFile *File, uint64_t Flags,
   this->Alignment = V;
 }
 
+// GNU assembler 2.24 and LLVM 4.0.0's MC (the newest release as of
+// March 2017) fail to infer section types for sections starting with
+// ".init_array." or ".fini_array.". They set SHT_PROGBITS instead of
+// SHF_INIT_ARRAY. As a result, the following assembler directive
+// creates ".init_array.100" with SHT_PROGBITS, for example.
+//
+//   .section .init_array.100, "aw"
+//
+// This function forces SHT_{INIT,FINI}_ARRAY so that we can handle
+// incorrect inputs as if they were correct from the beginning.
+static uint64_t getType(uint64_t Type, StringRef Name) {
+  if (Type == SHT_PROGBITS && Name.startswith(".init_array."))
+    return SHT_INIT_ARRAY;
+  if (Type == SHT_PROGBITS && Name.startswith(".fini_array."))
+    return SHT_FINI_ARRAY;
+  return Type;
+}
+
 template <class ELFT>
 InputSectionBase::InputSectionBase(elf::ObjectFile<ELFT> *File,
                                    const typename ELFT::Shdr *Hdr,
                                    StringRef Name, Kind SectionKind)
-    : InputSectionBase(File, Hdr->sh_flags & ~SHF_INFO_LINK, Hdr->sh_type,
-                       Hdr->sh_entsize, Hdr->sh_link, Hdr->sh_info,
-                       Hdr->sh_addralign, getSectionContents(File, Hdr), Name,
-                       SectionKind) {
+    : InputSectionBase(File, Hdr->sh_flags & ~SHF_INFO_LINK,
+                       getType(Hdr->sh_type, Name), Hdr->sh_entsize,
+                       Hdr->sh_link, Hdr->sh_info, Hdr->sh_addralign,
+                       getSectionContents(File, Hdr), Name, SectionKind) {
   // We reject object files having insanely large alignments even though
   // they are allowed by the spec. I think 4GB is a reasonable limitation.
   // We might want to relax this in the future.
@@ -139,10 +157,9 @@ OutputSection *SectionBase::getOutputSection() {
 
 // Uncompress section contents. Note that this function is called
 // from parallel_for_each, so it must be thread-safe.
-template <class ELFT> void InputSectionBase::uncompress() {
-  Decompressor Dec = check(Decompressor::create(
-      Name, toStringRef(Data), ELFT::TargetEndianness == llvm::support::little,
-      ELFT::Is64Bits));
+void InputSectionBase::uncompress() {
+  Decompressor Dec = check(Decompressor::create(Name, toStringRef(Data),
+                                                Config->IsLE, Config->Is64));
 
   size_t Size = Dec.getDecompressedSize();
   char *OutputBuf;
@@ -162,10 +179,9 @@ uint64_t SectionBase::getOffset(const DefinedRegular &Sym) const {
   return getOffset(Sym.Value);
 }
 
-template <class ELFT>
 InputSectionBase *InputSectionBase::getLinkOrderDep() const {
   if ((Flags & SHF_LINK_ORDER) && Link != 0)
-    return getFile<ELFT>()->getSections()[Link];
+    return File->getSections()[Link];
   return nullptr;
 }
 
@@ -221,9 +237,9 @@ bool InputSectionBase::classof(const SectionBase *S) {
   return S->kind() != Output;
 }
 
-template <class ELFT> InputSectionBase *InputSection::getRelocatedSection() {
+InputSectionBase *InputSection::getRelocatedSection() {
   assert(this->Type == SHT_RELA || this->Type == SHT_REL);
-  ArrayRef<InputSectionBase *> Sections = this->getFile<ELFT>()->getSections();
+  ArrayRef<InputSectionBase *> Sections = this->File->getSections();
   return Sections[this->Info];
 }
 
@@ -232,7 +248,7 @@ template <class ELFT> InputSectionBase *InputSection::getRelocatedSection() {
 // for each relocation. So we copy relocations one by one.
 template <class ELFT, class RelTy>
 void InputSection::copyRelocations(uint8_t *Buf, ArrayRef<RelTy> Rels) {
-  InputSectionBase *RelocatedSection = getRelocatedSection<ELFT>();
+  InputSectionBase *RelocatedSection = getRelocatedSection();
 
   // Loop is slow and have complexity O(N*M), where N - amount of
   // relocations and M - amount of symbols in symbol table.
@@ -824,21 +840,6 @@ template void InputSection::writeTo<ELF32LE>(uint8_t *Buf);
 template void InputSection::writeTo<ELF32BE>(uint8_t *Buf);
 template void InputSection::writeTo<ELF64LE>(uint8_t *Buf);
 template void InputSection::writeTo<ELF64BE>(uint8_t *Buf);
-
-template void InputSectionBase::uncompress<ELF32LE>();
-template void InputSectionBase::uncompress<ELF32BE>();
-template void InputSectionBase::uncompress<ELF64LE>();
-template void InputSectionBase::uncompress<ELF64BE>();
-
-template InputSectionBase *InputSectionBase::getLinkOrderDep<ELF32LE>() const;
-template InputSectionBase *InputSectionBase::getLinkOrderDep<ELF32BE>() const;
-template InputSectionBase *InputSectionBase::getLinkOrderDep<ELF64LE>() const;
-template InputSectionBase *InputSectionBase::getLinkOrderDep<ELF64BE>() const;
-
-template InputSectionBase *InputSection::getRelocatedSection<ELF32LE>();
-template InputSectionBase *InputSection::getRelocatedSection<ELF32BE>();
-template InputSectionBase *InputSection::getRelocatedSection<ELF64LE>();
-template InputSectionBase *InputSection::getRelocatedSection<ELF64BE>();
 
 template elf::ObjectFile<ELF32LE> *InputSectionBase::getFile<ELF32LE>() const;
 template elf::ObjectFile<ELF32BE> *InputSectionBase::getFile<ELF32BE>() const;

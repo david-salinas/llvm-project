@@ -217,11 +217,12 @@ struct ScriptConfiguration {
 
   // A map from memory region name to a memory region descriptor.
   llvm::DenseMap<llvm::StringRef, MemoryRegion> MemoryRegions;
+
+  // A list of undefined symbols referenced by the script.
+  std::vector<llvm::StringRef> UndefinedSymbols;
 };
 
-extern ScriptConfiguration *ScriptConfig;
-
-class LinkerScriptBase {
+class LinkerScript {
 protected:
   void assignSymbol(SymbolAssignment *Cmd, bool InSec = false);
   void computeInputSections(InputSectionDescription *);
@@ -242,9 +243,6 @@ protected:
 
   OutputSection *Aether;
   bool ErrorOnMissingSection = false;
-
-  // "ScriptConfig" is a bit too long, so define a short name for it.
-  ScriptConfiguration &Opt = *ScriptConfig;
 
   uint64_t Dot;
   uint64_t ThreadBssOffset = 0;
@@ -287,9 +285,12 @@ public:
   void writeDataBytes(StringRef Name, uint8_t *Buf);
   void addSymbol(SymbolAssignment *Cmd);
   void processCommands(OutputSectionFactory &Factory);
+
+  // Parsed linker script configurations are set to this struct.
+  ScriptConfiguration Opt;
 };
 
-extern LinkerScriptBase *Script;
+extern LinkerScript *Script;
 
 } // end namespace elf
 } // end namespace lld

@@ -2,10 +2,14 @@
 
 #include <stdio.h>
 
+// getauxval() used instead of sysconf() in GetPageSize() is defined starting
+// glbc version 2.16.
+#if defined(__GLIBC_PREREQ) && __GLIBC_PREREQ(2, 16)
 extern "C" long sysconf(int name) {
   fprintf(stderr, "sysconf wrapper called\n");
   return 0;
 }
+#endif  // defined(__GLIBC_PREREQ) && __GLIBC_PREREQ(2, 16)
 
 int main() {
   // All we need to check is that the sysconf() interceptor defined above was
