@@ -134,6 +134,8 @@ struct PrintSymbolMapElemsMatchingCLOpts {
 namespace llvm {
 namespace orc {
 
+  SymbolStringPool::PoolMapEntry SymbolStringPtr::Tombstone(0);
+
 char FailedToMaterialize::ID = 0;
 char SymbolsNotFound::ID = 0;
 char SymbolsCouldNotBeRemoved::ID = 0;
@@ -366,8 +368,8 @@ void AsynchronousSymbolQuery::detach() {
 }
 
 MaterializationResponsibility::MaterializationResponsibility(
-    JITDylib &JD, SymbolFlagsMap SymbolFlags)
-    : JD(JD), SymbolFlags(std::move(SymbolFlags)) {
+    JITDylib &JD, SymbolFlagsMap SymbolFlags, VModuleKey K)
+    : JD(JD), SymbolFlags(std::move(SymbolFlags)), K(std::move(K)) {
   assert(!this->SymbolFlags.empty() && "Materializing nothing?");
 
 #ifndef NDEBUG
@@ -459,7 +461,12 @@ void MaterializationResponsibility::replace(
 }
 
 MaterializationResponsibility
-MaterializationResponsibility::delegate(const SymbolNameSet &Symbols) {
+MaterializationResponsibility::delegate(const SymbolNameSet &Symbols,
+                                        VModuleKey NewKey) {
+
+  if (NewKey == VModuleKey())
+    NewKey = K;
+
   SymbolFlagsMap DelegatedFlags;
 
   for (auto &Name : Symbols) {
@@ -472,7 +479,8 @@ MaterializationResponsibility::delegate(const SymbolNameSet &Symbols) {
     SymbolFlags.erase(I);
   }
 
-  return MaterializationResponsibility(JD, std::move(DelegatedFlags));
+  return MaterializationResponsibility(JD, std::move(DelegatedFlags),
+                                       std::move(NewKey));
 }
 
 void MaterializationResponsibility::addDependencies(
@@ -489,8 +497,9 @@ void MaterializationResponsibility::addDependenciesForAll(
 }
 
 AbsoluteSymbolsMaterializationUnit::AbsoluteSymbolsMaterializationUnit(
-    SymbolMap Symbols)
-    : MaterializationUnit(extractFlags(Symbols)), Symbols(std::move(Symbols)) {}
+    SymbolMap Symbols, VModuleKey K)
+    : MaterializationUnit(extractFlags(Symbols), std::move(K)),
+      Symbols(std::move(Symbols)) {}
 
 StringRef AbsoluteSymbolsMaterializationUnit::getName() const {
   return "<Absolute Symbols>";
@@ -517,9 +526,9 @@ AbsoluteSymbolsMaterializationUnit::extractFlags(const SymbolMap &Symbols) {
 }
 
 ReExportsMaterializationUnit::ReExportsMaterializationUnit(
-    JITDylib *SourceJD, SymbolAliasMap Aliases)
-    : MaterializationUnit(extractFlags(Aliases)), SourceJD(SourceJD),
-      Aliases(std::move(Aliases)) {}
+    JITDylib *SourceJD, SymbolAliasMap Aliases, VModuleKey K)
+    : MaterializationUnit(extractFlags(Aliases), std::move(K)),
+      SourceJD(SourceJD), Aliases(std::move(Aliases)) {}
 
 StringRef ReExportsMaterializationUnit::getName() const {
   return "<Reexports>";
@@ -575,20 +584,22 @@ void ReExportsMaterializationUnit::materialize(
     SymbolNameSet QuerySymbols;
     SymbolAliasMap QueryAliases;
 
-    for (auto I = RequestedAliases.begin(), E = RequestedAliases.end();
-         I != E;) {
-      auto Tmp = I++;
-
+    // Collect as many aliases as we can without including a chain.
+    for (auto &KV : RequestedAliases) {
       // Chain detected. Skip this symbol for this round.
-      if (&SrcJD == &TgtJD && (QueryAliases.count(Tmp->second.Aliasee) ||
-                               RequestedAliases.count(Tmp->second.Aliasee)))
+      if (&SrcJD == &TgtJD && (QueryAliases.count(KV.second.Aliasee) ||
+                               RequestedAliases.count(KV.second.Aliasee)))
         continue;
 
-      ResponsibilitySymbols.insert(Tmp->first);
-      QuerySymbols.insert(Tmp->second.Aliasee);
-      QueryAliases[Tmp->first] = std::move(Tmp->second);
-      RequestedAliases.erase(Tmp);
+      ResponsibilitySymbols.insert(KV.first);
+      QuerySymbols.insert(KV.second.Aliasee);
+      QueryAliases[KV.first] = std::move(KV.second);
     }
+
+    // Remove the aliases collected this round from the RequestedAliases map.
+    for (auto &KV : QueryAliases)
+      RequestedAliases.erase(KV.first);
+
     assert(!QuerySymbols.empty() && "Alias cycle detected!");
 
     auto QueryInfo = std::make_shared<OnResolveInfo>(
@@ -686,26 +697,26 @@ buildSimpleReexportsAliasMap(JITDylib &SourceJD, const SymbolNameSet &Symbols) {
   return Result;
 }
 
-ReexportsFallbackDefinitionGenerator::ReexportsFallbackDefinitionGenerator(
-    JITDylib &BackingJD, SymbolPredicate Allow)
-    : BackingJD(BackingJD), Allow(std::move(Allow)) {}
+ReexportsGenerator::ReexportsGenerator(JITDylib &SourceJD,
+                                       SymbolPredicate Allow)
+    : SourceJD(SourceJD), Allow(std::move(Allow)) {}
 
-SymbolNameSet ReexportsFallbackDefinitionGenerator::
-operator()(JITDylib &JD, const SymbolNameSet &Names) {
+SymbolNameSet ReexportsGenerator::operator()(JITDylib &JD,
+                                             const SymbolNameSet &Names) {
   orc::SymbolNameSet Added;
   orc::SymbolAliasMap AliasMap;
 
-  auto Flags = BackingJD.lookupFlags(Names);
+  auto Flags = SourceJD.lookupFlags(Names);
 
   for (auto &KV : Flags) {
-    if (!Allow(KV.first))
+    if (Allow && !Allow(KV.first))
       continue;
     AliasMap[KV.first] = SymbolAliasMapEntry(KV.first, KV.second);
     Added.insert(KV.first);
   }
 
   if (!Added.empty())
-    cantFail(JD.define(reexports(BackingJD, AliasMap)));
+    cantFail(JD.define(reexports(SourceJD, AliasMap)));
 
   return Added;
 }
@@ -1117,10 +1128,10 @@ SymbolFlagsMap JITDylib::lookupFlags(const SymbolNameSet &Names) {
   return ES.runSessionLocked([&, this]() {
     SymbolFlagsMap Result;
     auto Unresolved = lookupFlagsImpl(Result, Names);
-    if (FallbackDefinitionGenerator && !Unresolved.empty()) {
-      auto FallbackDefs = FallbackDefinitionGenerator(*this, Unresolved);
-      if (!FallbackDefs.empty()) {
-        auto Unresolved2 = lookupFlagsImpl(Result, FallbackDefs);
+    if (DefGenerator && !Unresolved.empty()) {
+      auto NewDefs = DefGenerator(*this, Unresolved);
+      if (!NewDefs.empty()) {
+        auto Unresolved2 = lookupFlagsImpl(Result, NewDefs);
         (void)Unresolved2;
         assert(Unresolved2.empty() &&
                "All fallback defs should have been found by lookupFlagsImpl");
@@ -1156,14 +1167,13 @@ void JITDylib::lodgeQuery(std::shared_ptr<AsynchronousSymbolQuery> &Q,
   assert(Q && "Query can not be null");
 
   lodgeQueryImpl(Q, Unresolved, MatchNonExportedInJD, MatchNonExported, MUs);
-  if (FallbackDefinitionGenerator && !Unresolved.empty()) {
-    auto FallbackDefs = FallbackDefinitionGenerator(*this, Unresolved);
-    if (!FallbackDefs.empty()) {
-      for (auto &D : FallbackDefs)
+  if (DefGenerator && !Unresolved.empty()) {
+    auto NewDefs = DefGenerator(*this, Unresolved);
+    if (!NewDefs.empty()) {
+      for (auto &D : NewDefs)
         Unresolved.erase(D);
-      lodgeQueryImpl(Q, FallbackDefs, MatchNonExportedInJD, MatchNonExported,
-                     MUs);
-      assert(FallbackDefs.empty() &&
+      lodgeQueryImpl(Q, NewDefs, MatchNonExportedInJD, MatchNonExported, MUs);
+      assert(NewDefs.empty() &&
              "All fallback defs should have been found by lookupImpl");
     }
   }
@@ -1173,10 +1183,9 @@ void JITDylib::lodgeQueryImpl(
     std::shared_ptr<AsynchronousSymbolQuery> &Q, SymbolNameSet &Unresolved,
     JITDylib *MatchNonExportedInJD, bool MatchNonExported,
     std::vector<std::unique_ptr<MaterializationUnit>> &MUs) {
-  for (auto I = Unresolved.begin(), E = Unresolved.end(); I != E;) {
-    auto TmpI = I++;
-    auto Name = *TmpI;
 
+  std::vector<SymbolStringPtr> ToRemove;
+  for (auto Name : Unresolved) {
     // Search for the name in Symbols. Skip it if not found.
     auto SymI = Symbols.find(Name);
     if (SymI == Symbols.end())
@@ -1189,9 +1198,9 @@ void JITDylib::lodgeQueryImpl(
       if (!MatchNonExported && MatchNonExportedInJD != this)
         continue;
 
-    // If we matched against Name in JD, remove it frome the Unresolved set and
-    // add it to the added set.
-    Unresolved.erase(TmpI);
+    // If we matched against Name in JD, mark it to be removed from the Unresolved
+    // set.
+    ToRemove.push_back(Name);
 
     // If the symbol has an address then resolve it.
     if (SymI->second.getAddress() != 0)
@@ -1236,6 +1245,10 @@ void JITDylib::lodgeQueryImpl(
     MI.PendingQueries.push_back(Q);
     Q->addQueryDependence(*this, Name);
   }
+
+  // Remove any symbols that we found.
+  for (auto &Name : ToRemove)
+    Unresolved.erase(Name);
 }
 
 SymbolNameSet JITDylib::legacyLookup(std::shared_ptr<AsynchronousSymbolQuery> Q,
@@ -1250,15 +1263,15 @@ SymbolNameSet JITDylib::legacyLookup(std::shared_ptr<AsynchronousSymbolQuery> Q,
   SymbolNameSet Unresolved = std::move(Names);
   ES.runSessionLocked([&, this]() {
     ActionFlags = lookupImpl(Q, MUs, Unresolved);
-    if (FallbackDefinitionGenerator && !Unresolved.empty()) {
+    if (DefGenerator && !Unresolved.empty()) {
       assert(ActionFlags == None &&
              "ActionFlags set but unresolved symbols remain?");
-      auto FallbackDefs = FallbackDefinitionGenerator(*this, Unresolved);
-      if (!FallbackDefs.empty()) {
-        for (auto &D : FallbackDefs)
+      auto NewDefs = DefGenerator(*this, Unresolved);
+      if (!NewDefs.empty()) {
+        for (auto &D : NewDefs)
           Unresolved.erase(D);
-        ActionFlags = lookupImpl(Q, MUs, FallbackDefs);
-        assert(FallbackDefs.empty() &&
+        ActionFlags = lookupImpl(Q, MUs, NewDefs);
+        assert(NewDefs.empty() &&
                "All fallback defs should have been found by lookupImpl");
       }
     }
@@ -1295,19 +1308,17 @@ JITDylib::lookupImpl(std::shared_ptr<AsynchronousSymbolQuery> &Q,
                      std::vector<std::unique_ptr<MaterializationUnit>> &MUs,
                      SymbolNameSet &Unresolved) {
   LookupImplActionFlags ActionFlags = None;
+  std::vector<SymbolStringPtr> ToRemove;
 
-  for (auto I = Unresolved.begin(), E = Unresolved.end(); I != E;) {
-    auto TmpI = I++;
-    auto Name = *TmpI;
+  for (auto Name : Unresolved) {
 
     // Search for the name in Symbols. Skip it if not found.
     auto SymI = Symbols.find(Name);
     if (SymI == Symbols.end())
       continue;
 
-    // If we found Name, remove it frome the Unresolved set and add it
-    // to the dependencies set.
-    Unresolved.erase(TmpI);
+    // If we found Name, mark it to be removed from the Unresolved set.
+    ToRemove.push_back(Name);
 
     // If the symbol has an address then resolve it.
     if (SymI->second.getAddress() != 0) {
@@ -1357,6 +1368,10 @@ JITDylib::lookupImpl(std::shared_ptr<AsynchronousSymbolQuery> &Q,
     MI.PendingQueries.push_back(Q);
     Q->addQueryDependence(*this, Name);
   }
+
+  // Remove any marked symbols from the Unresolved set.
+  for (auto &Name : ToRemove)
+    Unresolved.erase(Name);
 
   return ActionFlags;
 }
