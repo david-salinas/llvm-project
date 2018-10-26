@@ -13037,7 +13037,7 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
 
     if (!FD->isInvalidDecl()) {
       // Don't diagnose unused parameters of defaulted or deleted functions.
-      if (!FD->isDeleted() && !FD->isDefaulted())
+      if (!FD->isDeleted() && !FD->isDefaulted() && !FD->hasSkippedBody())
         DiagnoseUnusedParameters(FD->parameters());
       DiagnoseSizeOfParametersAndReturnValue(FD->parameters(),
                                              FD->getReturnType(), FD);
@@ -13132,7 +13132,8 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
     assert(MD == getCurMethodDecl() && "Method parsing confused");
     MD->setBody(Body);
     if (!MD->isInvalidDecl()) {
-      DiagnoseUnusedParameters(MD->parameters());
+      if (!MD->hasSkippedBody())
+        DiagnoseUnusedParameters(MD->parameters());
       DiagnoseSizeOfParametersAndReturnValue(MD->parameters(),
                                              MD->getReturnType(), MD);
 
@@ -16295,7 +16296,7 @@ Decl *Sema::ActOnEnumConstant(Scope *S, Decl *theEnumDecl, Decl *lastEnumConst,
     return nullptr;
 
   if (PrevDecl) {
-    if (!TheEnumDecl->isScoped()) {
+    if (!TheEnumDecl->isScoped() && isa<ValueDecl>(PrevDecl)) {
       // Check for other kinds of shadowing not already handled.
       CheckShadow(New, PrevDecl, R);
     }

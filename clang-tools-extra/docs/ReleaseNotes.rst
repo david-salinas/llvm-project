@@ -67,16 +67,19 @@ The improvements are...
 Improvements to clang-tidy
 --------------------------
 
-- The :doc:`readability-redundant-smartptr-get
-  <clang-tidy/checks/readability-redundant-smartptr-get>` check does not warn
-  about calls inside macros anymore by default.
-
 - New :doc:`abseil-duration-division
   <clang-tidy/checks/abseil-duration-division>` check.
 
   Checks for uses of ``absl::Duration`` division that is done in a
   floating-point context, and recommends the use of a function that
   returns a floating-point value.
+
+- New :doc:`abseil-duration-factory-float
+  <clang-tidy/checks/abseil-duration-factory-float>` check.
+
+  Checks for cases where the floating-point overloads of various
+  ``absl::Duration`` factory functions are called when the more-efficient
+  integer versions could be used instead.
 
 - New :doc:`abseil-faster-strsplit-delimiter
   <clang-tidy/checks/abseil-faster-strsplit-delimiter>` check.
@@ -107,6 +110,12 @@ Improvements to clang-tidy
   Flags uses of ``absl::StrCat()`` to append to a ``std::string``. Suggests
   ``absl::StrAppend()`` should be used instead.
 
+- New :doc:`cppcoreguidelines-macro-usage
+  <clang-tidy/checks/cppcoreguidelines-macro-usage>` check.
+
+  Finds macro usage that is considered problematic because better language
+  constructs exist for the task.
+
 - New :doc:`misc-non-private-member-variables-in-classes
   <clang-tidy/checks/misc-non-private-member-variables-in-classes>` check.
 
@@ -133,29 +142,15 @@ Improvements to clang-tidy
   Detects usage of magic numbers, numbers that are used as literals instead of
   introduced via constants or symbols.
 
-- New :doc:`readability-uppercase-literal-suffix
-  <clang-tidy/checks/readability-uppercase-literal-suffix>` check.
-
-  Detects when the integral literal or floating point literal has non-uppercase
-  suffix, and suggests to make the suffix uppercase. The list of destination
-  suffixes can be optionally provided.
-
-- New alias :doc:`cert-dcl16-c
-  <clang-tidy/checks/cert-dcl16-c>` to :doc:`readability-uppercase-literal-suffix
-  <clang-tidy/checks/readability-uppercase-literal-suffix>`
-  added.
-
 - New alias :doc:`cppcoreguidelines-non-private-member-variables-in-classes
   <clang-tidy/checks/cppcoreguidelines-non-private-member-variables-in-classes>`
   to :doc:`misc-non-private-member-variables-in-classes
   <clang-tidy/checks/misc-non-private-member-variables-in-classes>`
   added.
 
-- New alias :doc:`hicpp-uppercase-literal-suffix
-  <clang-tidy/checks/hicpp-uppercase-literal-suffix>` to
-  :doc:`readability-uppercase-literal-suffix
-  <clang-tidy/checks/readability-uppercase-literal-suffix>`
-  added.
+- The :doc:`readability-redundant-smartptr-get
+  <clang-tidy/checks/readability-redundant-smartptr-get>` check does not warn
+  about calls inside macros anymore by default.
 
 Improvements to include-fixer
 -----------------------------
