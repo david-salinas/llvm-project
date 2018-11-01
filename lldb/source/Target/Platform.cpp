@@ -603,7 +603,7 @@ RecurseCopy_Callback(void *baton, llvm::sys::fs::file_type ft,
 
     FileSpec src_resolved;
 
-    rc_baton->error = FileSystem::Readlink(src, src_resolved);
+    rc_baton->error = FileSystem::Instance().Readlink(src, src_resolved);
 
     if (rc_baton->error.Fail())
       return FileSpec::eEnumerateDirectoryResultQuit; // got an error, bail out
@@ -733,7 +733,7 @@ Status Platform::Install(const FileSpec &src, const FileSpec &dst) {
     case fs::file_type::symlink_file: {
       llvm::sys::fs::remove(fixed_dst.GetPath());
       FileSpec src_resolved;
-      error = FileSystem::Readlink(src, src_resolved);
+      error = FileSystem::Instance().Readlink(src, src_resolved);
       if (error.Success())
         error = CreateSymlink(dst, src_resolved);
     } break;
@@ -1820,9 +1820,19 @@ lldb::ProcessSP Platform::ConnectProcess(llvm::StringRef connect_url,
   error.Clear();
 
   if (!target) {
+    ArchSpec arch;
+    if (target && target->GetArchitecture().IsValid())
+      arch = target->GetArchitecture();
+    else
+      arch = Target::GetDefaultArchitecture();
+
+    const char *triple = "";
+    if (arch.IsValid())
+      triple = arch.GetTriple().getTriple().c_str();
+
     TargetSP new_target_sp;
     error = debugger.GetTargetList().CreateTarget(
-        debugger, "", "", eLoadDependentsNo, nullptr, new_target_sp);
+        debugger, "", triple, eLoadDependentsNo, nullptr, new_target_sp);
     target = new_target_sp.get();
   }
 

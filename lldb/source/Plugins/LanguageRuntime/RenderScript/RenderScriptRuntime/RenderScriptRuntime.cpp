@@ -1758,7 +1758,7 @@ bool RenderScriptRuntime::EvalRSExpression(const char *expr,
   if (!expr_result->GetError().Success()) {
     Status err = expr_result->GetError();
     // Expression returned is void, so this is actually a success
-    if (err.GetError() == lldb::eExpressionProducedNoResult) {
+    if (err.GetError() == UserExpression::kNoResult) {
       if (log)
         log->Printf("%s - expression returned void.", __FUNCTION__);
 
@@ -3718,7 +3718,8 @@ bool RenderScriptRuntime::GetKernelCoordinate(RSCoordinate &coord,
       continue;
 
     // Find the function name
-    const SymbolContext sym_ctx = frame_sp->GetSymbolContext(false);
+    const SymbolContext sym_ctx =
+        frame_sp->GetSymbolContext(eSymbolContextFunction);
     const ConstString func_name = sym_ctx.GetFunctionName();
     if (!func_name)
       continue;

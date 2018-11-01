@@ -15,11 +15,10 @@
 #include "Views/RegisterFileStatistics.h"
 #include "llvm/Support/Format.h"
 
-using namespace llvm;
-
+namespace llvm {
 namespace mca {
 
-RegisterFileStatistics::RegisterFileStatistics(const llvm::MCSubtargetInfo &sti)
+RegisterFileStatistics::RegisterFileStatistics(const MCSubtargetInfo &sti)
     : STI(sti) {
   const MCSchedModel &SM = STI.getSchedModel();
   RegisterFileUsage Empty = {0, 0, 0};
@@ -106,3 +105,4 @@ void RegisterFileStatistics::printView(raw_ostream &OS) const {
 }
 
 } // namespace mca
+} // namespace llvm

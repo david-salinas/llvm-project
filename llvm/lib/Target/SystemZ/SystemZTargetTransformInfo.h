@@ -85,6 +85,7 @@ public:
   int getCmpSelInstrCost(unsigned Opcode, Type *ValTy, Type *CondTy,
                          const Instruction *I = nullptr);
   int getVectorInstrCost(unsigned Opcode, Type *Val, unsigned Index);
+  bool isFoldableLoad(const LoadInst *Ld, const Instruction *&FoldedValue);
   int getMemoryOpCost(unsigned Opcode, Type *Src, unsigned Alignment,
                       unsigned AddressSpace, const Instruction *I = nullptr);
 
@@ -92,7 +93,9 @@ public:
                                  unsigned Factor,
                                  ArrayRef<unsigned> Indices,
                                  unsigned Alignment,
-                                 unsigned AddressSpace, bool IsMasked = false);
+                                 unsigned AddressSpace,
+                                 bool UseMaskForCond = false,
+                                 bool UseMaskForGaps = false);
   /// @}
 };
 
