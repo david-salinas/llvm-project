@@ -63,6 +63,9 @@
 #define __ACTIVEMASK() __ballot(1)
 #endif
 
+#define __SYNCTHREADS_N(n) asm volatile("bar.sync %0;" : : "r"(n) : "memory");
+#define __SYNCTHREADS() __SYNCTHREADS_N(0)
+
 // arguments needed for L0 parallelism only.
 class omptarget_nvptx_SharedArgs {
 public:
@@ -173,7 +176,7 @@ public:
     prev = taskDescr;
   }
   // init & copy
-  INLINE void InitLevelZeroTaskDescr();
+  INLINE void InitLevelZeroTaskDescr(bool isSPMDExecutionMode);
   INLINE void InitLevelOneTaskDescr(uint16_t tnum,
                                     omptarget_nvptx_TaskDescr *parentTaskDescr);
   INLINE void Copy(omptarget_nvptx_TaskDescr *sourceTaskDescr);
@@ -254,7 +257,7 @@ public:
   INLINE uint64_t *getLastprivateIterBuffer() { return &lastprivateIterBuffer; }
 
   // init
-  INLINE void InitTeamDescr();
+  INLINE void InitTeamDescr(bool isSPMDExecutionMode);
 
   INLINE __kmpc_data_sharing_slot *RootS(int wid, bool IsMasterThread) {
     // If this is invoked by the master thread of the master warp then intialize
@@ -459,7 +462,8 @@ extern volatile __device__ __shared__ omptarget_nvptx_WorkFn
 
 INLINE omptarget_nvptx_TeamDescr &getMyTeamDescriptor();
 INLINE omptarget_nvptx_WorkDescr &getMyWorkDescriptor();
-INLINE omptarget_nvptx_TaskDescr *getMyTopTaskDescriptor();
+INLINE omptarget_nvptx_TaskDescr *
+getMyTopTaskDescriptor(bool isSPMDExecutionMode);
 INLINE omptarget_nvptx_TaskDescr *getMyTopTaskDescriptor(int globalThreadId);
 
 ////////////////////////////////////////////////////////////////////////////////
