@@ -1308,7 +1308,8 @@ llvm::Value *ItaniumCXXABI::EmitTypeid(CodeGenFunction &CGF,
   auto *ClassDecl =
       cast<CXXRecordDecl>(SrcRecordTy->getAs<RecordType>()->getDecl());
   llvm::Value *Value =
-      CGF.GetVTablePtr(ThisPtr, StdTypeInfoPtrTy->getPointerTo(), ClassDecl);
+      CGF.GetVTablePtr(ThisPtr, CGF.getTypes().getDefaultPointerTo(
+          StdTypeInfoPtrTy), ClassDecl);
 
   // Load the type info.
   Value = CGF.Builder.CreateConstInBoundsGEP1_64(Value, -1ULL);
@@ -2798,7 +2799,7 @@ ItaniumRTTIBuilder::GetAddrOfExternalRTTIDescriptor(QualType Ty) {
     CGM.setGVProperties(GV, RD);
   }
 
-  return llvm::ConstantExpr::getBitCast(GV, CGM.Int8PtrTy);
+  return llvm::ConstantExpr::getPointerCast(GV, CGM.Int8PtrTy);
 }
 
 /// TypeInfoIsInStandardLibrary - Given a builtin type, returns whether the type
@@ -3167,7 +3168,7 @@ void ItaniumRTTIBuilder::BuildVTablePointer(const Type *Ty) {
   llvm::Constant *Two = llvm::ConstantInt::get(PtrDiffTy, 2);
   VTable =
       llvm::ConstantExpr::getInBoundsGetElementPtr(CGM.Int8PtrTy, VTable, Two);
-  VTable = llvm::ConstantExpr::getBitCast(VTable, CGM.Int8PtrTy);
+  VTable = llvm::ConstantExpr::getPointerCast(VTable, CGM.Int8PtrTy);
 
   Fields.push_back(VTable);
 }
@@ -3240,7 +3241,7 @@ llvm::Constant *ItaniumRTTIBuilder::BuildTypeInfo(QualType Ty) {
     assert(!OldGV->hasAvailableExternallyLinkage() &&
            "available_externally typeinfos not yet implemented");
 
-    return llvm::ConstantExpr::getBitCast(OldGV, CGM.Int8PtrTy);
+    return llvm::ConstantExpr::getPointerCast(OldGV, CGM.Int8PtrTy);
   }
 
   // Check if there is already an external RTTI descriptor for this type.
@@ -3300,7 +3301,7 @@ llvm::Constant *ItaniumRTTIBuilder::BuildTypeInfo(
     TypeNameField =
         llvm::ConstantExpr::getIntToPtr(TypeNameField, CGM.Int8PtrTy);
   } else {
-    TypeNameField = llvm::ConstantExpr::getBitCast(TypeName, CGM.Int8PtrTy);
+    TypeNameField = llvm::ConstantExpr::getPointerCast(TypeName, CGM.Int8PtrTy);
   }
   Fields.push_back(TypeNameField);
 
@@ -3810,8 +3811,7 @@ static StructorCodegen getCodegenToUse(CodeGenModule &CGM,
 
   if (llvm::GlobalValue::isWeakForLinker(Linkage)) {
     // Only ELF and wasm support COMDATs with arbitrary names (C5/D5).
-    if (CGM.getTarget().getTriple().isOSBinFormatELF() ||
-        CGM.getTarget().getTriple().isOSBinFormatWasm())
+    if (CGM.supportsCOMDAT())
       return StructorCodegen::COMDAT;
     return StructorCodegen::Emit;
   }

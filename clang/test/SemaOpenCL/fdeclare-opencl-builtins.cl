@@ -1,13 +1,8 @@
-// RUN: %clang_cc1 %s -triple spir -verify -pedantic -fsyntax-only -cl-std=CL2.0 -fdeclare-opencl-builtins -DNO_HEADER
-// RUN: %clang_cc1 %s -triple spir -verify -pedantic -fsyntax-only -cl-std=CL2.0 -fdeclare-opencl-builtins -finclude-default-header
+// RUN: %clang_cc1 %s -triple spir -verify -pedantic -fsyntax-only -cl-std=CL2.0 -fdeclare-opencl-builtins
 // expected-no-diagnostics
 
 // Test the -fdeclare-opencl-builtins option.
 
-#pragma OPENCL EXTENSION cl_khr_fp16 : enable
-
-// Provide typedefs when invoking clang without -finclude-default-header.
-#ifdef NO_HEADER
 typedef char char2 __attribute__((ext_vector_type(2)));
 typedef char char4 __attribute__((ext_vector_type(4)));
 typedef float float4 __attribute__((ext_vector_type(4)));
@@ -17,7 +12,6 @@ typedef int int4 __attribute__((ext_vector_type(4)));
 typedef long long2 __attribute__((ext_vector_type(2)));
 typedef unsigned int uint;
 typedef __SIZE_TYPE__ size_t;
-#endif
 
 kernel void test_pointers(volatile global void *global_p, global const int4 *a) {
   int i;

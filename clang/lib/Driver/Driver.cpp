@@ -24,6 +24,7 @@
 #include "ToolChains/Gnu.h"
 #include "ToolChains/HIP.h"
 #include "ToolChains/Haiku.h"
+#include "ToolChains/Hcc.h"
 #include "ToolChains/Hexagon.h"
 #include "ToolChains/Hurd.h"
 #include "ToolChains/Lanai.h"
@@ -408,6 +409,24 @@ DerivedArgList *Driver::TranslateInputArgs(const InputArgList &Args) const {
   }
 #endif
 
+  // Add extra flags -hc should imply.
+  if (Args.hasArg(options::OPT_hc_mode)) {
+    DAL->AddFlagArg(0, Opts.getOption(options::OPT_famp));
+    DAL->AddPositionalArg(0, Opts.getOption(options::OPT_Xclang), "-famp");
+    DAL->AddPositionalArg(0, Opts.getOption(options::OPT_Xclang), "-fhsa-ext");
+
+    // We need at least C++11 or C++AMP. If we're not given an explicit C++
+    // standard, add one because the default is too old.
+    if (!Args.hasArg(options::OPT_std_EQ)) {
+      DAL->AddPositionalArg(0, Opts.getOption(options::OPT_std_EQ), "c++amp");
+    }
+    if (Args.hasArg(options::OPT_hc_function_calls)) {
+      DAL->AddFlagArg(nullptr, Opts.getOption(options::OPT_hc_function_calls));
+    }
+  } else if (Args.hasArg(options::OPT_famp)) {
+    DAL->AddPositionalArg(0, Opts.getOption(options::OPT_Xclang), "-famp");
+  }
+
   return DAL;
 }
 
@@ -712,6 +731,25 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
     } else
       Diag(clang::diag::warn_drv_empty_joined_argument)
           << OpenMPTargets->getAsString(C.getInputArgs());
+  }
+
+  //
+  // HCC
+  //
+  // Initialize HCC device TC if we have HCC inputs.
+  if (llvm::any_of(Inputs, [](const std::pair<types::ID, const Arg *> &I) {
+        return types::isHCC(I.first);
+      })) {
+
+    const ToolChain *HostTC = C.getSingleOffloadToolChain<Action::OFK_Host>();
+    llvm::Triple HccTriple("amdgcn--amdhsa-hcc");
+    auto &HccTC = ToolChains[HccTriple.str()];
+    if (!HccTC)
+      HccTC = std::make_unique<toolchains::HCCToolChain>(*this, HccTriple, *HostTC, C.getInputArgs());
+      
+    const ToolChain *TC = HccTC.get();
+
+    C.addOffloadDeviceToolChain(TC, Action::OFK_HCC);
   }
 
   //
@@ -2159,9 +2197,50 @@ void Driver::BuildInputs(const ToolChain &TC, DerivedArgList &Args,
         }
       }
 
-      if (DiagnoseInputExistence(Args, Value, Ty, /*TypoCorrect=*/true))
-        Inputs.push_back(std::make_pair(Ty, A));
-
+      if (DiagnoseInputExistence(Args, Value, Ty, /*TypoCorrect=*/true)) {
+        // C++ AMP-specific
+        // For C++ source files, duplicate the input so we launch the compiler twice
+        // 1 for GPU compilation (TY_CXX_AMP), 1 for CPU compilation (TY_CXX)
+        if (Ty == types::TY_CXX && (Args.hasArg(options::OPT_famp) ||
+          Args.getLastArgValue(options::OPT_std_EQ).equals("c++amp"))) {
+          Arg *FinalPhaseArg;
+          phases::ID FinalPhase = getFinalPhase(Args, &FinalPhaseArg);
+          switch (FinalPhase) {
+            // -E
+            case phases::Preprocess:
+            // -c
+            case phases::Assemble:
+            // build executable
+            case phases::Link:
+              if (Args.hasArg(options::OPT_cxxamp_cpu_mode))
+                  Inputs.push_back(std::make_pair(types::TY_CXX_AMP_CPU, A));
+              if(Args.hasArg(options::OPT_hc_mode)) {
+                Inputs.push_back(std::make_pair(types::TY_HC_HOST, A));
+                Inputs.push_back(std::make_pair(types::TY_HC_KERNEL, A));
+              } else {
+                Inputs.push_back(std::make_pair(Ty, A));
+                Inputs.push_back(std::make_pair(types::TY_CXX_AMP, A));
+              }
+            break;
+            // -S
+            case phases::Backend:
+              if (Args.hasArg(options::OPT_cxxamp_kernel_mode)) {
+                Inputs.push_back(std::make_pair(types::TY_CXX_AMP, A));
+              } else if (Args.hasArg(options::OPT_cxxamp_cpu_mode)) {
+                  Inputs.push_back(std::make_pair(types::TY_CXX_AMP_CPU, A));
+              } else {
+                Inputs.push_back(std::make_pair(Ty, A));
+              }
+            break;
+            default:
+              Inputs.push_back(std::make_pair(Ty, A));
+            break;
+          }
+        } else {
+          // Standard compilation flow
+          Inputs.push_back(std::make_pair(Ty, A));
+        }
+      }
     } else if (A->getOption().matches(options::OPT__SLASH_Tc)) {
       StringRef Value = A->getValue();
       if (DiagnoseInputExistence(Args, Value, types::TY_C,
@@ -3547,8 +3626,12 @@ void Driver::BuildJobs(Compilation &C) const {
         ++NumOutputs;
 
     if (NumOutputs > 1) {
-      Diag(clang::diag::err_drv_output_argument_with_multiple_files);
-      FinalOutput = nullptr;
+      // relax rule for C++AMP because we may have multiple outputs
+      if (!C.getArgs().hasArg(options::OPT_famp) &&
+        !C.getArgs().getLastArgValue(options::OPT_std_EQ).equals("c++amp")) {
+        Diag(clang::diag::err_drv_output_argument_with_multiple_files);
+        FinalOutput = nullptr;
+      }
     }
   }
 
@@ -3577,11 +3660,11 @@ void Driver::BuildJobs(Compilation &C) const {
     }
 
     BuildJobsForAction(C, A, &C.getDefaultToolChain(),
-                       /*BoundArch*/ StringRef(),
-                       /*AtTopLevel*/ true,
-                       /*MultipleArchs*/ ArchNames.size() > 1,
-                       /*LinkingOutput*/ LinkingOutput, CachedResults,
-                       /*TargetDeviceOffloadKind*/ Action::OFK_None);
+                      /*BoundArch*/ StringRef(),
+                      /*AtTopLevel*/ true,
+                      /*MultipleArchs*/ ArchNames.size() > 1,
+                      /*LinkingOutput*/ LinkingOutput, CachedResults,
+                      /*TargetDeviceOffloadKind*/ Action::OFK_None);
   }
 
   // If the user passed -Qunused-arguments or there were errors, don't warn
@@ -3620,6 +3703,14 @@ void Driver::BuildJobs(Compilation &C) const {
 
         if (DuplicateClaimed)
           continue;
+      }
+
+      // Suppress the warning if this is -Xclang -fhsa-ext
+      if (Opt.getKind() == Option::SeparateClass) {
+        if (Opt.getName() == "Xclang" &&
+            A->containsValue("-fhsa-ext")) {
+          continue;
+        }
       }
 
       // In clang-cl, don't mention unknown arguments here since they have
@@ -3891,6 +3982,17 @@ public:
   /// dropping them. If no suitable tool is found, null will be returned.
   const Tool *getTool(ActionList &Inputs,
                       ActionList &CollapsedOffloadAction) {
+
+    if (BaseAction->ContainsActions(Action::AssembleJobClass, types::TY_HC_HOST) ||
+        BaseAction->ContainsActions(Action::AssembleJobClass, types::TY_HC_KERNEL) ||
+        BaseAction->ContainsActions(Action::AssembleJobClass, types::TY_PP_CXX_AMP) ||
+        BaseAction->ContainsActions(Action::AssembleJobClass, types::TY_PP_CXX_AMP_CPU)) {
+      const ToolChain *DeviceTC = C.getSingleOffloadToolChain<Action::OFK_HCC>();
+      assert(DeviceTC && "HCC Device ToolChain is not set.");
+      Inputs = BaseAction->getInputs();
+      return DeviceTC->SelectTool(*BaseAction);
+    }
+
     //
     // Get the largest chain of actions that we could combine.
     //
@@ -4102,9 +4204,18 @@ InputInfo Driver::BuildJobsForActionNoCache(
     // FIXME: Clean this up.
     bool SubJobAtTopLevel =
         AtTopLevel && (isa<DsymutilJobAction>(A) || isa<VerifyJobAction>(A));
+    // UPGRADE_TBD: Find a better way to check HCC-specific Action objects
+    // Find correct Tool for HCC-specific Actions in HCC ToolChain
+    bool IsHccTC =
+      JA->ContainsActions(Action::BackendJobClass, types::TY_PP_CXX_AMP) ||
+      JA->ContainsActions(Action::BackendJobClass, types::TY_PP_CXX_AMP_CPU) ||
+      JA->ContainsActions(Action::AssembleJobClass, types::TY_HC_KERNEL) ||
+      JA->ContainsActions(Action::AssembleJobClass, types::TY_PP_CXX_AMP) ||
+      JA->ContainsActions(Action::AssembleJobClass, types::TY_PP_CXX_AMP_CPU);
     InputInfos.push_back(BuildJobsForAction(
-        C, Input, TC, BoundArch, SubJobAtTopLevel, MultipleArchs, LinkingOutput,
-        CachedResults, A->getOffloadingDeviceKind()));
+      C, Input, IsHccTC ? C.getSingleOffloadToolChain<Action::OFK_HCC>() : TC,
+      BoundArch, SubJobAtTopLevel, MultipleArchs, LinkingOutput, CachedResults,
+      A->getOffloadingDeviceKind()));
   }
 
   // Always use the first input as the base input.
@@ -4342,6 +4453,9 @@ const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
     } else {
       TmpName = GetTemporaryPath(Split.first, Suffix);
     }
+    if (JA.ContainsActions(Action::BackendJobClass, types::TY_PP_CXX_AMP_CPU) ||
+        JA.ContainsActions(Action::AssembleJobClass, types::TY_PP_CXX_AMP_CPU))
+      TmpName += ".cpu";
     return C.addTempFile(C.getArgs().MakeArgString(TmpName));
   }
 
@@ -4562,7 +4676,7 @@ std::string Driver::GetProgramPath(StringRef Name, const ToolChain &TC) const {
 
 std::string Driver::GetTemporaryPath(StringRef Prefix, StringRef Suffix) const {
   SmallString<128> Path;
-  std::error_code EC = llvm::sys::fs::createTemporaryFile(Prefix, Suffix, Path);
+  std::error_code EC = llvm::sys::fs::getPotentiallyUniqueTempFileName(Prefix, Suffix, Path); 
   if (EC) {
     Diag(clang::diag::err_unable_to_make_temp) << EC.message();
     return "";

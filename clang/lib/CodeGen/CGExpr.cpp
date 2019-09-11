@@ -112,6 +112,20 @@ llvm::AllocaInst *CodeGenFunction::CreateTempAlloca(llvm::Type *Ty,
                               ArraySize, Name, AllocaInsertPt);
 }
 
+llvm::Instruction *CodeGenFunction::CreateAlloca(llvm::Type *Ty,
+                                                 const Twine &Name,
+                                                 llvm::Instruction *InsertPos) {
+  return new llvm::AllocaInst(Ty,
+      CGM.getDataLayout().getAllocaAddrSpace(), nullptr, Name, InsertPos);
+}
+
+llvm::AllocaInst *
+CodeGenFunction::getAddrSpaceCastedAlloca(llvm::Instruction *V) const {
+  if (auto *Cast = dyn_cast<llvm::AddrSpaceCastInst>(V))
+    return cast<llvm::AllocaInst>(Cast->getOperand(0));
+  return cast<llvm::AllocaInst>(V);
+}
+
 /// CreateDefaultAlignTempAlloca - This creates an alloca with the
 /// default alignment of the corresponding LLVM type, which is *not*
 /// guaranteed to be related in any way to the expected alignment of
@@ -430,9 +444,8 @@ EmitMaterializeTemporaryExpr(const MaterializeTemporaryExpr *M) {
       ownership != Qualifiers::OCL_ExplicitNone) {
     Address Object = createReferenceTemporary(*this, M, E);
     if (auto *Var = dyn_cast<llvm::GlobalVariable>(Object.getPointer())) {
-      Object = Address(llvm::ConstantExpr::getBitCast(Var,
-                           ConvertTypeForMem(E->getType())
-                             ->getPointerTo(Object.getAddressSpace())),
+      Object = Address(llvm::ConstantExpr::getPointerCast(
+          Var, getTypes().getPointerTypeTo(E->getType())),
                        Object.getAlignment());
 
       // createReferenceTemporary will promote the temporary to a global with a
@@ -3340,8 +3353,9 @@ Address CodeGenFunction::EmitArrayToPointerDecay(const Expr *E,
   QualType EltType = E->getType()->castAsArrayTypeUnsafe()->getElementType();
   if (BaseInfo) *BaseInfo = LV.getBaseInfo();
   if (TBAAInfo) *TBAAInfo = CGM.getTBAAAccessInfo(EltType);
-
-  return Builder.CreateElementBitCast(Addr, ConvertTypeForMem(EltType));
+  return Builder.CreatePointerBitCastOrAddrSpaceCast(Addr,
+      ConvertTypeForMem(EltType)->getPointerTo(getContext().
+          getTargetAddressSpace(E->getType())));
 }
 
 /// isSimpleArrayDecayOperand - If the specified expr is a simple decay from an
