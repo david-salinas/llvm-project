@@ -182,7 +182,7 @@ RocmInstallationDetector::getInstallationPathCandidates() {
   if (!ROCmSearchDirs.empty())
     return ROCmSearchDirs;
 
-  auto DoPrintROCmSearchDirs = [&]() {
+  auto DoPrintROCmSearchDirs = [&]() { // SALINAS: this is how we print vars if HIPCC_VERBOSE is set.
     if (PrintROCmSearchDirs)
       for (auto Cand : ROCmSearchDirs) {
         llvm::errs() << "ROCm installation search path";
@@ -321,7 +321,7 @@ RocmInstallationDetector::RocmInstallationDetector(
     const Driver &D, const llvm::Triple &HostTriple,
     const llvm::opt::ArgList &Args, bool DetectHIPRuntime, bool DetectDeviceLib)
     : D(D) {
-  Verbose = Args.hasArg(options::OPT_v);
+  Verbose = Args.hasArg(options::OPT_v); // SALINAS - use this to check HIPCC_VERBOSE ?
   RocmPathArg = Args.getLastArgValue(clang::driver::options::OPT_rocm_path_EQ);
   PrintROCmSearchDirs =
       Args.hasArg(clang::driver::options::OPT_print_rocm_search_dirs);
@@ -547,6 +547,7 @@ void amdgpu::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   CmdArgs.push_back("-shared");
   CmdArgs.push_back("-o");
   CmdArgs.push_back(Output.getFilename());
+  // SALINAS - add call to function to collect arguments from env. var. "HIPCC_LINK_FLAGS_APPEND"
   C.addCommand(std::make_unique<Command>(
       JA, *this, ResponseFileSupport::AtFileCurCP(), Args.MakeArgString(Linker),
       CmdArgs, Inputs, Output));

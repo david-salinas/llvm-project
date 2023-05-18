@@ -21,6 +21,7 @@
 #include "llvm/Support/Alignment.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/Process.h" // SALINAS
 #include "llvm/TargetParser/TargetParser.h"
 
 using namespace clang::driver;
@@ -215,6 +216,9 @@ HIPAMDToolChain::HIPAMDToolChain(const Driver &D, const llvm::Triple &Triple,
       D.getDiags().Report(clang::diag::warn_drv_unsupported_option_for_target)
           << A->getAsString(Args) << getTriple().str();
   }
+
+  // SALINAS
+  emitHIPCC_VERBOSE();
 }
 
 void HIPAMDToolChain::addClangTargetOptions(
@@ -419,4 +423,53 @@ void HIPAMDToolChain::checkTargetID(
     getDriver().Diag(clang::diag::err_drv_bad_target_id)
         << *PTID.OptionalTargetID;
   }
+}
+
+// SALINAS
+int HIPAMDToolChain::getHIPCC_VERBOSE() {
+    int HipccVerboseInt = 0;
+	std::optional<std::string> HipccVerboseEnv = llvm::sys::Process::GetEnv("HIPCC_VERBOSE");
+	if (!HipccVerboseEnv->empty()) {
+		HipccVerboseInt = std::stoi(HipccVerboseEnv.value());
+	}
+
+	return HipccVerboseInt;
+}
+
+void HIPAMDToolChain::emitHIPCC_VERBOSE() {
+	llvm::errs() << "HIPCC_VEROSE ...." << "\n";
+	int HipccVerbose = getHIPCC_VERBOSE();
+
+	if (HipccVerbose > 0) {
+		std::optional<std::string> HipPlatform = llvm::sys::Process::GetEnv("HIP_PLATFORM");
+
+		bool PlatformAmd = !HipPlatform->empty() ? (HipPlatform.value().compare("amd") ? true : false) : false;
+		bool PlatformNvidia = !HipPlatform->empty() ? (HipPlatform.value().compare("nvidia") ? true : false) : false;
+
+		if (HipccVerbose >= 1) {
+			// emit hipcc-cmd
+			// not sure if this is needed at all.
+		}
+		if (HipccVerbose >=2) {
+			llvm::errs() << "HIP_PATH=" << llvm::sys::Process::GetEnv("HIP_PATH") << "\n";
+			llvm::errs() << "HIP_PLATFORM=" << HipPlatform.value();
+			llvm::errs() << "HIP_RUNTIME="<< llvm::sys::Process::GetEnv("HIP_RUNTIME") << "\n";
+			llvm::errs() << "HIP_COMPILER="<< llvm::sys::Process::GetEnv("HIP_COMPILER") << "\n";
+
+				if (PlatformAmd) {
+					llvm::errs() << "ROCM_PATH="<< llvm::sys::Process::GetEnv("ROCM_PATH") << "\n";
+					llvm::errs() << "HIP_CLANG_PATH="<< llvm::sys::Process::GetEnv("HIP_CLANG_PATH") << "\n";
+					llvm::errs() << "HIP_INCLUDE_PATH="<< llvm::sys::Process::GetEnv("HIP_INCLUDE_PATH") << "\n";
+					llvm::errs() << "HIP_LIB_PATH="<< llvm::sys::Process::GetEnv("HIP_LIB_PATH") << "\n";
+					llvm::errs() << "DEVICE_LIB_PATH="<< llvm::sys::Process::GetEnv("DEVICE_LIB_PATH") << "\n";
+					llvm::errs() << "HIP_CLANG_RT_LIB="<< llvm::sys::Process::GetEnv("HIP_CLANG_RT_LIB") << "\n";
+				} else if (PlatformNvidia) {
+					llvm::errs() << "CUDA_PATH="<< llvm::sys::Process::GetEnv("CUDA_PATH") << "\n";
+				}
+		}
+
+		if (HipccVerbose >= 4) {
+			// emit hipcc args
+		}
+	}
 }
