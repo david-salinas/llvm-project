@@ -769,7 +769,6 @@ Driver::OpenMPRuntimeKind Driver::getOpenMPRuntime(const ArgList &Args) const {
 
 void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
                                               InputList &Inputs) {
-
   //
   // CUDA/HIP
   //
@@ -6329,7 +6328,6 @@ std::string Driver::GetClPchPath(Compilation &C, StringRef BaseName) const {
 
 const ToolChain &Driver::getToolChain(const ArgList &Args,
                                       const llvm::Triple &Target) const {
-
   auto &TC = ToolChains[Target.str()];
   if (!TC) {
     switch (Target.getOS()) {
@@ -6517,6 +6515,7 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
 const ToolChain &Driver::getOffloadingDeviceToolChain(
     const ArgList &Args, const llvm::Triple &Target, const ToolChain &HostTC,
     const Action::OffloadKind &TargetDeviceOffloadKind) const {
+
   // Use device / host triples as the key into the ToolChains map because the
   // device ToolChain we create depends on both.
   auto &TC = ToolChains[Target.str() + "/" + HostTC.getTriple().str()];
@@ -6531,20 +6530,19 @@ const ToolChain &Driver::getOffloadingDeviceToolChain(
            Target.getVendor() == llvm::Triple::AMD &&
            Target.getOS() == llvm::Triple::AMDHSA) ||
           !Args.hasArgNoClaim(options::OPT_offload_EQ))
-        TC = std::make_unique<toolchains::HIPAMDToolChain>(*this, Target,
-                                                           HostTC, Args);
+        TC = std::make_unique<toolchains::HIPAMDToolChain>(
+            *this, Target, HostTC, Args);
       else if (Target.getArch() == llvm::Triple::spirv64 &&
-               Target.getVendor() == llvm::Triple::UnknownVendor &&
-               Target.getOS() == llvm::Triple::UnknownOS)
-        TC = std::make_unique<toolchains::HIPSPVToolChain>(*this, Target,
-                                                           HostTC, Args);
+                 Target.getVendor() == llvm::Triple::UnknownVendor &&
+                 Target.getOS() == llvm::Triple::UnknownOS) 
+        TC = std::make_unique<toolchains::HIPSPVToolChain>(
+            *this, Target, HostTC, Args);
       break;
     }
     default:
       break;
     }
   }
-
   return *TC;
 }
 

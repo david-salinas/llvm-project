@@ -306,23 +306,29 @@ RocmInstallationDetector::getInstallationPathCandidates() {
       LatestVer = Ver;
     }
   }
-  if (!LatestROCm.empty())
-    ROCmSearchDirs.emplace_back(D.SysRoot + "/opt/" + LatestROCm,
-                                /*StrictChecking=*/true);
 
-  ROCmSearchDirs.emplace_back(D.SysRoot + "/usr/local",
-                              /*StrictChecking=*/true);
-  ROCmSearchDirs.emplace_back(D.SysRoot + "/usr",
-                              /*StrictChecking=*/true);
+  if (!isHostWindows()) {
+    
+    if (!LatestROCm.empty())
+      ROCmSearchDirs.emplace_back(D.SysRoot + "/opt/" + LatestROCm,
+                                  /*StrictChecking=*/true);
+
+    ROCmSearchDirs.emplace_back(D.SysRoot + "/usr/local",
+                                /*StrictChecking=*/true);
+    ROCmSearchDirs.emplace_back(D.SysRoot + "/usr",
+                                /*StrictChecking=*/true);
+  }
 
   DoPrintROCmSearchDirs();
   return ROCmSearchDirs;
 }
 
 RocmInstallationDetector::RocmInstallationDetector(
-    const Driver &D, const llvm::Triple &HostTriple,
-    const llvm::opt::ArgList &Args, bool DetectHIPRuntime, bool DetectDeviceLib)
-    : D(D) {
+    const Driver &D, const llvm::Triple &TargetTriple,
+    const llvm::opt::ArgList &Args /*, SALINAS bool DetectHIPRuntime,
+    bool DetectDeviceLib, bool isMSVC*/) 
+    : D(D), TargetTriple(TargetTriple) {
+  /* SALINAS IsHostMSVC = isMSVC; */
   Verbose = Args.hasArg(options::OPT_v);
   RocmPathArg = Args.getLastArgValue(clang::driver::options::OPT_rocm_path_EQ);
   PrintROCmSearchDirs =
@@ -376,10 +382,12 @@ RocmInstallationDetector::RocmInstallationDetector(
                           .str();
   }
 
-  if (DetectHIPRuntime)
-    detectHIPRuntime();
-  if (DetectDeviceLib)
-    detectDeviceLibrary();
+  // SALINAS
+  //if (DetectHIPRuntime) 
+  //  detectHIPRuntime();
+  //}
+  //if (DetectDeviceLib)
+  //  detectDeviceLibrary();
 }
 
 void RocmInstallationDetector::detectDeviceLibrary() {
@@ -686,8 +694,8 @@ void amdgpu::getAMDGPUTargetFeatures(const Driver &D,
 AMDGPUToolChain::AMDGPUToolChain(const Driver &D, const llvm::Triple &Triple,
                                  const ArgList &Args)
     : Generic_ELF(D, Triple, Args),
-      OptionsDefault(
-          {{options::OPT_O, "3"}, {options::OPT_cl_std_EQ, "CL1.2"}}) {
+      OptionsDefault({{options::OPT_O, "3"},
+                      {options::OPT_cl_std_EQ, "CL1.2"}}) {
   // Check code object version options. Emit warnings for legacy options
   // and errors for the last invalid code object version options.
   // It is done here to avoid repeated warning or error messages for
@@ -820,8 +828,10 @@ bool AMDGPUToolChain::isWave64(const llvm::opt::ArgList &DriverArgs,
 
 /// ROCM Toolchain
 ROCMToolChain::ROCMToolChain(const Driver &D, const llvm::Triple &Triple,
-                             const ArgList &Args)
+                             const ArgList &Args, bool isHostTCMSVC)
     : AMDGPUToolChain(D, Triple, Args) {
+  RocmInstallation->setHostWindows(isHostTCMSVC);
+
   RocmInstallation->detectDeviceLibrary();
 }
 
