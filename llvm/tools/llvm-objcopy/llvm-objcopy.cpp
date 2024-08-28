@@ -138,7 +138,8 @@ static Error executeObjcopyOnRawBinary(ConfigManager &ConfigMgr,
 static Error executeObjcopy(ConfigManager &ConfigMgr) {
   CommonConfig &Config = ConfigMgr.Common;
 
-  Expected<FilePermissionsApplier> PermsApplierOrErr =
+  if (Config.NeedPositional) {
+    Expected<FilePermissionsApplier> PermsApplierOrErr =
       FilePermissionsApplier::create(Config.InputFilename);
   if (!PermsApplierOrErr)
     return PermsApplierOrErr.takeError();
@@ -219,7 +220,7 @@ static Error executeObjcopy(ConfigManager &ConfigMgr) {
             PermsApplierOrErr->apply(Config.SplitDWO, Config.PreserveDates,
                                      static_cast<sys::fs::perms>(0666)))
       return E;
-
+  }
   return Error::success();
 }
 

@@ -210,6 +210,24 @@ static Error dumpSectionToFile(StringRef SecName, StringRef Filename,
                          "section '%s' not found", SecName.str().c_str());
 }
 
+static Error dumpRawDataURIToFile(StringRef Filename, int64_t Offset, int64_t Size, ObjectFile &Obj) {
+  StringRef OutputFileName(Obj.getFileName().str() + "-offset" + itostr(Offset) + "-size" + itostr(Size) + ".co");
+
+  Expected<std::unique_ptr<FileOutputBuffer>> BufferOrErr =
+    FileOutputBuffer::create(OutputFileName, Size);
+
+  if (!BufferOrErr)
+    return BufferOrErr.takeError();
+
+  MemoryBufferRef input = Obj.getMemoryBufferRef();
+  std::unique_ptr<FileOutputBuffer> Buf = std::move(*BufferOrErr);
+  std::copy(input.getBufferStart(), input.getBufferStart() + Size, Buf->getBufferStart());
+  if (Error E = Buf->commit())
+    return E;
+
+  return Error::success();
+}
+
 Error Object::compressOrDecompressSections(const CommonConfig &Config) {
   // Build a list of sections we are going to replace.
   // We can't call `addSection` while iterating over sections,

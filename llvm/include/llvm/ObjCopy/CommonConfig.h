@@ -276,6 +276,8 @@ struct CommonConfig {
   bool StripUnneeded = false;
   bool Weaken = false;
   bool DecompressDebugSections = false;
+  bool DumpURI = false;
+  bool NeedPositional = true;
 
   DebugCompressionType CompressionType = DebugCompressionType::None;
 

@@ -167,12 +167,11 @@ public:
     if (!Str.consume_front("#offset="))
       return createStringError(object_error::parse_failed,
                                "Reading 'offset' in URI");
-
     StringRef OffsetStr = Str.take_until([](char C) { return C == '&'; });
     OffsetStr.getAsInteger(10, O);
     Str = Str.drop_front(OffsetStr.size());
 
-    if (Str.consume_front("&size="))
+    if (!Str.consume_front("&size="))
       return createStringError(object_error::parse_failed,
                                "Reading 'size' in URI");
 

@@ -15,6 +15,8 @@
 #include "llvm-readobj.h"
 #include "llvm/Object/Archive.h"
 #include "llvm/Object/Decompressor.h"
+#include "llvm/Object/OffloadBinary.h"
+#include "llvm/Object/OffloadBundle.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FormatVariadic.h"
@@ -227,6 +229,25 @@ void ObjDumper::printSectionsAsHex(const object::ObjectFile &Obj,
 
       W.getOStream() << '\n';
     }
+  }
+}
+
+// TODO: add proper error handling.
+void ObjDumper::printOffloading(const object::ObjectFile &Obj) {
+  // we can use an argument to let user select which offloading section they want to print.
+  // but for now, we're hardcoding ELF and "hip_fatbin".
+  assert((Obj.isELF() || Obj.isCOFF()) && "Invalid file type");
+
+  SmallVector<llvm::object::OffloadBundleFatBin> Bundles;
+  if (Error Err = llvm::object::extractOffloadBundleFatBinary(Obj,Bundles))
+    reportWarning(createError("Cannot extract Fatbin Binary from Object."), Obj.getFileName());
+
+  // Print out all the FatBin Bundles that are contained in this buffer.
+  SmallVectorImpl<llvm::object::OffloadBundleFatBin>::iterator it = Bundles.begin();
+  for (uint64_t I = 0; I < Bundles.size(); I++) {
+    outs() << "Bundle " << I << "\n";
+    it->printEntriesAsURI();
+    ++it;
   }
 }
 

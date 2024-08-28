@@ -17,6 +17,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Object/OffloadBinary.h"
 
 #include <unordered_set>
 
@@ -184,6 +185,7 @@ public:
   std::function<Error(const Twine &Msg)> WarningHandler;
   void reportUniqueWarning(Error Err) const;
   void reportUniqueWarning(const Twine &Msg) const;
+  void printOffloading(const object::ObjectFile &Obj);
 
 protected:
   ScopedPrinter &W;
